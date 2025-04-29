@@ -18,7 +18,7 @@ def extract_region_from_arn(arn):
 
 
 # 環境変数からFastAPIのエンドポイントURLを取得
-FASTAPI_ENDPOINT_URL = os.environ.get("FASTAPI_ENDPOINT_URL")
+FASTAPI_ENDPOINT_URL = os.environ.get("https://1b6d-35-247-121-2.ngrok-free.app/")
 
 def lambda_handler(event, context):
     print(f"Received event: {json.dumps(event)}")
