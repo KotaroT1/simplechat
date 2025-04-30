@@ -1,153 +1,201 @@
 # lambda/index.py
 import json
 import os
-import re  # 正規表現モジュールをインポート
-import urllib.request
-import urllib.parse
-import urllib.error # エラー処理のためにインポート
-
-
-# Lambda コンテキストからリージョンを抽出する関数
-def extract_region_from_arn(arn):
-    # ARN 形式: arn:aws:lambda:region:account-id:function:function-name
-    match = re.search('arn:aws:lambda:([^:]+):', arn)
-    if match:
-        return match.group(1)
-    return "us-east-1"  # デフォルト値
-
-
+import requests # boto3, re, ClientErrorは不要になったため削除し、requestsを追加
 
 # 環境変数からFastAPIのエンドポイントURLを取得
-FASTAPI_ENDPOINT_URL = os.environ.get("https://1b6d-35-247-121-2.ngrok-free.app/")
+# Lambda関数の環境変数に FASTAPI_ENDPOINT_URL を設定してください
+# 例: "https://xxxx-xx-xxx-xx-xx.ngrok-free.app/process"
+FASTAPI_ENDPOINT_URL = os.environ.get('FASTAPI_ENDPOINT_URL')
+
+# FastAPIへのリクエストタイムアウト（秒）
+REQUEST_TIMEOUT = 20 # 必要に応じて調整
+
+# Bedrock関連の変数と関数は不要になったため削除
+# bedrock_client = None
+# MODEL_ID = ...
+# extract_region_from_arn(...)
 
 def lambda_handler(event, context):
-    print(f"Received event: {json.dumps(event)}")
-
-    # エンドポイントURLが設定されているか確認
-    if not FASTAPI_ENDPOINT_URL:
-        print("FASTAPI_ENDPOINT_URL environment variable not set.")
-        return {
-            'statusCode': 500,
-            'headers': { 'Content-Type': 'application/json' },
-            'body': json.dumps({'response': 'Configuration error: FastAPI endpoint URL not set.'})
-        }
-
+    # --- [変更なし] リクエストとユーザー情報の処理 ---
     try:
-        # API Gatewayからのリクエストペイロードを取得
-        # 通常は event['body'] にJSON文字列が入っている
-        if 'body' not in event or not isinstance(event['body'], str):
-             print("Invalid event format: 'body' missing or not a string.")
-             return {
-                'statusCode': 400, # Bad Request
-                 'headers': { 'Content-Type': 'application/json' },
-                'body': json.dumps({'response': 'Invalid request format.'})
-            }
+        print("Received event:", json.dumps(event))
 
-        request_body_json_str = event['body']
-        request_body = json.loads(request_body_json_str)
-        user_message = request_body.get('message')
-        # 必要に応じて、リクエストから他のデータ（例: ユーザーID）を取得
-        user_id = request_body.get('userId', 'anonymous_lambda')
+        # Cognitoで認証されたユーザー情報を取得 (存在する場合)
+        user_info = None
+        if 'requestContext' in event and 'authorizer' in event['requestContext']:
+            # Cognitoユーザープールオーソライザーの場合
+            if 'claims' in event['requestContext']['authorizer']:
+                user_info = event['requestContext']['authorizer']['claims']
+                print(f"Authenticated user: {user_info.get('email') or user_info.get('cognito:username')}")
+            # IAMオーソライザーの場合など、他の形式も考慮可能
+            # elif 'principalId' in event['requestContext']['authorizer']:
+            #     user_info = {'principalId': event['requestContext']['authorizer']['principalId']}
+            #     print(f"Authenticated principalId: {user_info['principalId']}")
 
-        if not user_message:
-             print("Message not found in request body.")
-             return {
-                'statusCode': 400, # Bad Request
-                 'headers': { 'Content-Type': 'application/json' },
-                'body': json.dumps({'response': 'Message field is missing in the request body.'})
-            }
-
-        # FastAPIに送信するペイロードを準備
-        payload_to_fastapi = {
-            "message": user_message,
-            "userId": user_id # FastAPI側で利用する場合
-        }
-
-        # ペイロードをJSON文字列に変換し、バイトデータにエンコード
-        data = json.dumps(payload_to_fastapi).encode('utf-8')
-
-        # FastAPIのエンドポイントURLとパスを結合
-        url = FASTAPI_ENDPOINT_URL.rstrip('/') + "/chat/"
-
-        # HTTPリクエストヘッダーを定義
-        headers = {
-            'Content-Type': 'application/json',
-            'Content-Length': len(data) # データ長を指定 (POSTの場合推奨)
-        }
-
-        # Requestオブジェクトを作成
-        req = urllib.request.Request(url, data=data, headers=headers, method='POST')
-
-        print(f"Sending request to FastAPI: {url}")
-
-        # HTTPリクエストを送信し、応答を取得
-        # タイムアウトは seconds で指定
-        timeout_seconds = 90
-        with urllib.request.urlopen(req, timeout=timeout_seconds) as response:
-            # HTTPステータスコードを確認
-            status_code = response.getcode()
-            print(f"Received status code from FastAPI: {status_code}")
-
-            # 応答ボディを読み込み、デコード
-            response_body = response.read().decode('utf-8')
-            print(f"Received response body (raw): {response_body}")
-
-            # FastAPIからの応答をJSONとして解析
-            fastapi_response = json.loads(response_body)
-            print(f"Received response (parsed): {json.dumps(fastapi_response)}")
-
-            # API Gatewayに返す形式に整形
-            return {
-                'statusCode': status_code, # FastAPIから返されたステータスコードを返す
-                'headers': { 'Content-Type': 'application/json' },
-                'body': json.dumps(fastapi_response) # FastAPIからの応答ボディをそのまま返す
-            }
-
-    except urllib.error.HTTPError as e:
-        # HTTPエラー (4xx, 5xxなど)
-        print(f"HTTP Error occurred: {e.code} - {e.reason}")
-        error_body = e.read().decode('utf-8')
-        print(f"HTTP Error response body: {error_body}")
-        # エラー応答ボディをそのまま返すか、エラーメッセージを整形して返す
+        # リクエストボディの解析
         try:
-             error_response_json = json.loads(error_body)
+            if isinstance(event.get('body'), str):
+                body = json.loads(event['body'])
+            else:
+                body = event.get('body', {}) # HTTP API v2 や直接呼び出しの場合
         except json.JSONDecodeError:
-             error_response_json = {"response": f"Backend service returned error: {e.code} - {e.reason}", "details": error_body}
+             print("Error decoding JSON body.")
+             raise ValueError("Invalid JSON format in request body") # エラーを発生させて下のcatchで処理
+
+        if not body or 'message' not in body:
+            raise ValueError("Request body must contain a 'message' field.")
+
+        message = body['message']
+        # クライアントから送られてきた会話履歴を取得 (なければ空リスト)
+        conversation_history = body.get('conversationHistory', [])
+
+        print(f"Processing message: '{message}'")
+        print(f"Received conversation history length: {len(conversation_history)}")
+
+        # --- [変更箇所] Bedrock呼び出しの代わりにFastAPIを呼び出す ---
+
+        if not FASTAPI_ENDPOINT_URL:
+            print("Error: FASTAPI_ENDPOINT_URL environment variable is not set.")
+            raise EnvironmentError("FastAPI endpoint URL is not configured.")
+
+        # FastAPIに送信するペイロードを作成
+        # FastAPI側が 'message' と 'conversationHistory' を受け取ることを想定
+        payload_to_fastapi = {
+            'message': message,
+            'conversationHistory': conversation_history
+            # 必要に応じて、FastAPIが期待する他の情報（ユーザー情報など）を追加できます
+            # 'userInfo': user_info # 例：ユーザー情報を渡す場合
+        }
+
+        # ヘッダー (認証なし)
+        headers = {
+            'Content-Type': 'application/json'
+        }
+
+        print(f"Calling FastAPI endpoint: {FASTAPI_ENDPOINT_URL}")
+        # print(f"Sending payload to FastAPI: {json.dumps(payload_to_fastapi)}") # デバッグ用
+
+        # FastAPIにPOSTリクエストを送信
+        try:
+            response = requests.post(
+                FASTAPI_ENDPOINT_URL,
+                json=payload_to_fastapi,
+                headers=headers,
+                timeout=REQUEST_TIMEOUT
+            )
+
+            # FastAPIからのエラー応答 (4xx, 5xx) をチェック
+            response.raise_for_status()
+
+            # FastAPIからの応答 (JSON) を取得
+            fastapi_response_data = response.json()
+            print(f"Received response from FastAPI: {fastapi_response_data}")
+
+            # FastAPIからの応答からアシスタントの返信を取得
+            # FastAPI側が 'result' というキーで応答を返すことを期待
+            assistant_response = fastapi_response_data.get('result')
+            if assistant_response is None:
+                # FastAPIが期待通りの応答を返さなかった場合
+                print("Error: 'result' key not found in FastAPI response.")
+                raise ValueError("Invalid response format received from FastAPI.")
+
+        except requests.exceptions.Timeout:
+            print(f"Error: Request to FastAPI timed out after {REQUEST_TIMEOUT} seconds.")
+            # タイムアウトエラーとして処理 (504 Gateway Timeout)
+            return {
+                "statusCode": 504,
+                "headers": {
+                    "Content-Type": "application/json",
+                    "Access-Control-Allow-Origin": "*", # CORSヘッダー
+                    "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
+                    "Access-Control-Allow-Methods": "OPTIONS,POST"
+                },
+                "body": json.dumps({
+                    "success": False,
+                    "error": "The request to the backend service timed out."
+                })
+            }
+        except requests.exceptions.RequestException as req_err:
+            # ネットワークエラー、FastAPIからのエラー応答 (4xx, 5xx) など
+            error_message = f"Failed to communicate with the backend service: {req_err}"
+            status_code = 502 # Bad Gateway (デフォルト)
+            detail = str(req_err)
+            if req_err.response is not None:
+                status_code = req_err.response.status_code
+                try:
+                    detail = req_err.response.json() # FastAPIのエラー詳細を試みる
+                except json.JSONDecodeError:
+                    detail = req_err.response.text # JSONでなければテキスト
+
+            print(f"Error calling FastAPI endpoint: Status={status_code}, Detail={detail}")
+            # FastAPIエラーとして処理 (502 Bad Gateway or FastAPIのステータスコード)
+            return {
+                "statusCode": status_code,
+                "headers": {
+                    "Content-Type": "application/json",
+                    "Access-Control-Allow-Origin": "*", # CORSヘッダー
+                    "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
+                    "Access-Control-Allow-Methods": "OPTIONS,POST"
+                },
+                "body": json.dumps({
+                    "success": False,
+                    "error": "Backend service error",
+                    "detail": detail
+                })
+            }
+
+        # --- [変更箇所] 会話履歴の更新 ---
+        # 元の会話履歴をコピーして新しいやり取りを追加
+        messages = conversation_history.copy()
+        messages.append({
+            "role": "user",
+            "content": message
+        })
+        messages.append({
+            "role": "assistant",
+            "content": assistant_response # FastAPIからの応答を使用
+        })
+
+        # --- [変更なし] 成功レスポンスの返却 ---
+        print("Successfully processed request.")
+        return {
+            "statusCode": 200,
+            "headers": {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*", # CORSヘッダーは維持
+                "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
+                "Access-Control-Allow-Methods": "OPTIONS,POST"
+            },
+            "body": json.dumps({
+                "success": True,
+                "response": assistant_response, # FastAPIからの応答
+                "conversationHistory": messages # 更新された会話履歴
+            })
+        }
+
+    # --- [変更なし] 全体的なエラーハンドリング ---
+    except (ValueError, EnvironmentError, Exception) as error:
+        error_type = type(error).__name__
+        error_message = str(error)
+        print(f"Error ({error_type}): {error_message}")
+
+        status_code = 400 if isinstance(error, (ValueError, json.JSONDecodeError)) else 500
 
         return {
-            'statusCode': e.code, # HTTPエラーのステータスコードを返す
-            'headers': { 'Content-Type': 'application/json' },
-            'body': json.dumps(error_response_json)
+            "statusCode": status_code,
+            "headers": {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*", # CORSヘッダー
+                "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
+                "Access-Control-Allow-Methods": "OPTIONS,POST"
+            },
+            "body": json.dumps({
+                "success": False,
+                "error": error_message,
+                "errorType": error_type
+            })
         }
-    except urllib.error.URLError as e:
-        # URLエラー (ネットワーク接続の問題など)
-        print(f"URL Error occurred: {e.reason}")
-        return {
-            'statusCode': 502, # Bad Gateway
-            'headers': { 'Content-Type': 'application/json' },
-            'body': json.dumps({'response': f'Error communicating with the backend service: {e.reason}'})
-        }
-    except json.JSONDecodeError:
-         # イベントボディまたはFastAPI応答のJSONデコードエラー
-         print("Error decoding JSON from API Gateway event body or FastAPI response.")
-         return {
-            'statusCode': 400, # Bad Request (イベントボディの場合) または 502 (FastAPI応答の場合)
-            'headers': { 'Content-Type': 'application/json' },
-            'body': json.dumps({'response': 'Invalid JSON format in request or backend service response.'})
-        }
-    except Exception as e:
-        # その他の予期しないエラー
-        print(f"An unexpected error occurred: {e}")
-        return {
-            'statusCode': 500, # Internal Server Error
-            'headers': { 'Content-Type': 'application/json' },
-            'body': json.dumps({'response': f'An internal server error occurred: {e}'})
-        }
-       
-       
-                   
-         
-    
      
         
      
