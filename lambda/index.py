@@ -4,12 +4,10 @@ import os
 import requests # boto3, re, ClientErrorは不要になったため削除し、requestsを追加
 
 # 環境変数からFastAPIのエンドポイントURLを取得
-# Lambda関数の環境変数に FASTAPI_ENDPOINT_URL を設定してください
-# 例: "https://xxxx-xx-xxx-xx-xx.ngrok-free.app/process"
 FASTAPI_ENDPOINT_URL = os.environ.get('https://3385-34-82-152-218.ngrok-free.app/')
 
 # FastAPIへのリクエストタイムアウト（秒）
-REQUEST_TIMEOUT = 20 # 必要に応じて調整
+REQUEST_TIMEOUT = 30 # 必要に応じて調整
 
 # Bedrock関連の変数と関数は不要になったため削除
 # bedrock_client = None
@@ -117,7 +115,7 @@ def lambda_handler(event, context):
                 })
             }
         except requests.exceptions.RequestException as req_err:
-            # ネットワークエラー、FastAPIからのエラー応答 (4xx, 5xx) など
+            # ネットワークエラー、FastAPIからのエラー応答 
             error_message = f"Failed to communicate with the backend service: {req_err}"
             status_code = 502 # Bad Gateway (デフォルト)
             detail = str(req_err)
