@@ -6,7 +6,7 @@ import requests # boto3, re, ClientErrorは不要になったため削除し、r
 # 環境変数からFastAPIのエンドポイントURLを取得
 # Lambda関数の環境変数に FASTAPI_ENDPOINT_URL を設定してください
 # 例: "https://xxxx-xx-xxx-xx-xx.ngrok-free.app/process"
-FASTAPI_ENDPOINT_URL = os.environ.get('FASTAPI_ENDPOINT_URL')
+FASTAPI_ENDPOINT_URL = os.environ.get('https://3385-34-82-152-218.ngrok-free.app/')
 
 # FastAPIへのリクエストタイムアウト（秒）
 REQUEST_TIMEOUT = 20 # 必要に応じて調整
