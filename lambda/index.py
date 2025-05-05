@@ -6,8 +6,6 @@ import urllib.error   # エラーハンドリング用
 import socket         # タイムアウト判定用
 
 # 環境変数からFastAPIのエンドポイントURLを取得
-# Lambda関数の環境変数に FASTAPI_ENDPOINT_URL を設定してください
-# 例: "https://xxxx-xx-xxx-xx-xx.ngrok-free.app/process"
 FASTAPI_ENDPOINT_URL = os.environ.get('FASTAPI_ENDPOINT_URL')
 
 # FastAPIへのリクエストタイムアウト（秒）
