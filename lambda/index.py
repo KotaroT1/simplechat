@@ -1,15 +1,15 @@
 # lambda/index.py
 import json
 import os
-import urllib.request # requests の代わりに urllib を使用
+import urllib.request # urllib を使用
 import urllib.error   # エラーハンドリング用
 import socket         # タイムアウト判定用
 
 # 環境変数からFastAPIのエンドポイントURLを取得
-FASTAPI_ENDPOINT_URL = os.environ.get('FASTAPI_ENDPOINT_URL')
+FASTAPI_ENDPOINT_URL = os.environ.get('https://4ea8-34-168-182-69.ngrok-free.app/')
 
 # FastAPIへのリクエストタイムアウト（秒）
-REQUEST_TIMEOUT = 20 # 必要に応じて調整
+REQUEST_TIMEOUT = 30 # 必要に応じて調整
 
 def lambda_handler(event, context):
     # --- [変更なし] リクエストとユーザー情報の処理 ---
